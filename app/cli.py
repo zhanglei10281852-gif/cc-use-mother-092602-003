@@ -76,6 +76,54 @@ def command_compute_demo() -> int:
     return 0 if task.status_code == 202 and claimed.status_code == 200 and claimed.json().get("task") else 1
 
 
+def command_power_demo() -> int:
+    with TestClient(app) as client:
+        payload = client.post(
+            "/api/power/payloads?actor=cli-demo",
+            json={"code": "power-demo-cam", "name": "演示相机", "baseline_power_w": 200.0},
+        )
+        if payload.status_code not in {201, 409}:
+            print(payload.text)
+            return 1
+        for window in (
+            {"start_at": "2026-10-01T00:00:00+00:00", "end_at": "2026-10-01T01:00:00+00:00"},
+            {"start_at": "2026-10-01T02:00:00+00:00", "end_at": "2026-10-01T03:00:00+00:00"},
+        ):
+            created = client.post("/api/power/sun-windows?actor=cli-demo", json=window)
+            if created.status_code not in {201, 409}:
+                print(created.text)
+                return 1
+        job = client.post(
+            "/api/power/jobs?actor=cli-user",
+            json={
+                "code": "power-demo-job",
+                "name": "演示推理作业",
+                "payload_code": "power-demo-cam",
+                "priority": 60,
+                "scheduled_start_at": "2026-10-01T00:00:00+00:00",
+                "phases": [{"power_w": 700, "duration_s": 1800}, {"power_w": 400, "duration_s": 1800}],
+            },
+        )
+        if job.status_code not in {201, 409}:
+            print(job.text)
+            return 1
+        evaluation = client.post("/api/power/jobs/power-demo-job/evaluations", json={"actor": "cli-demo"})
+        if evaluation.status_code != 201:
+            print(evaluation.text)
+            return 1
+        body = evaluation.json()
+    result = {
+        "evaluation_id": body["evaluation"]["id"],
+        "formula_version": body["evaluation"]["formula_version"],
+        "feasible": body["result"]["feasible"],
+        "peak_w": body["result"]["summary"]["peak_w"],
+        "total_energy_wh": body["result"]["summary"]["total_energy_wh"],
+        "execution_order": body["result"]["execution_order"],
+    }
+    print(json.dumps(result, ensure_ascii=False))
+    return 0 if body["result"]["feasible"] else 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="compute-operations", description="科学计算任务运营服务维护入口")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -83,8 +131,15 @@ def main() -> int:
     subparsers.add_parser("check-db", help="检查数据库完整性")
     subparsers.add_parser("smoke", help="执行本地 API 冒烟检查")
     subparsers.add_parser("compute-demo", help="执行计算任务提交与领取演示")
+    subparsers.add_parser("power-demo", help="执行卫星功率预算登记与评估演示")
     args = parser.parse_args()
-    return {"init-db": command_init, "check-db": command_check, "smoke": command_smoke, "compute-demo": command_compute_demo}[args.command]()
+    return {
+        "init-db": command_init,
+        "check-db": command_check,
+        "smoke": command_smoke,
+        "compute-demo": command_compute_demo,
+        "power-demo": command_power_demo,
+    }[args.command]()
 
 
 if __name__ == "__main__":
