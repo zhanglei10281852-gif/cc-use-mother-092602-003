@@ -293,6 +293,120 @@ CREATE TABLE IF NOT EXISTS compute_interventions (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_compute_interventions_task ON compute_interventions(task_id,id);
+
+CREATE TABLE IF NOT EXISTS power_payloads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    nominal_watts REAL NOT NULL CHECK(nominal_watts >= 0),
+    max_watts REAL NOT NULL CHECK(max_watts > 0),
+    active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+    notes TEXT NOT NULL DEFAULT '',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS power_sunlight_segments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    starts_at TEXT NOT NULL,
+    ends_at TEXT NOT NULL,
+    available_watts REAL NOT NULL CHECK(available_watts > 0),
+    source TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    CHECK(ends_at > starts_at)
+);
+CREATE TABLE IF NOT EXISTS power_budgets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    current_version INTEGER NOT NULL DEFAULT 1,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS power_budget_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    budget_id INTEGER NOT NULL REFERENCES power_budgets(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    total_watts REAL NOT NULL CHECK(total_watts > 0),
+    reserve_watts REAL NOT NULL CHECK(reserve_watts >= 0),
+    eclipse_energy_wh REAL NOT NULL DEFAULT 0 CHECK(eclipse_energy_wh >= 0),
+    reason TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(budget_id, version)
+);
+CREATE TABLE IF NOT EXISTS power_deratings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    budget_id INTEGER NOT NULL REFERENCES power_budgets(id) ON DELETE CASCADE,
+    starts_at TEXT NOT NULL,
+    ends_at TEXT NOT NULL,
+    watts REAL NOT NULL CHECK(watts > 0),
+    reason TEXT NOT NULL DEFAULT '',
+    active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    CHECK(ends_at > starts_at)
+);
+CREATE INDEX IF NOT EXISTS idx_power_deratings_budget ON power_deratings(budget_id,active);
+CREATE TABLE IF NOT EXISTS power_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    requested_by TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    request_digest TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','submitted','approved','published','withdrawn')),
+    current_version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(requested_by, idempotency_key)
+);
+CREATE TABLE IF NOT EXISTS power_plan_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL REFERENCES power_plans(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    jobs_json TEXT NOT NULL,
+    jobs_digest TEXT NOT NULL,
+    change_note TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(plan_id, version)
+);
+CREATE TABLE IF NOT EXISTS power_plan_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL REFERENCES power_plans(id) ON DELETE CASCADE,
+    actor TEXT NOT NULL,
+    action TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    from_status TEXT NOT NULL,
+    to_status TEXT NOT NULL,
+    plan_version INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_power_plan_events_plan ON power_plan_events(plan_id,id);
+CREATE TABLE IF NOT EXISTS power_evaluations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL REFERENCES power_plans(id) ON DELETE CASCADE,
+    plan_version INTEGER NOT NULL,
+    budget_id INTEGER NOT NULL REFERENCES power_budgets(id) ON DELETE CASCADE,
+    budget_version INTEGER NOT NULL,
+    formula_version TEXT NOT NULL,
+    input_snapshot_json TEXT NOT NULL,
+    input_digest TEXT NOT NULL,
+    decision TEXT NOT NULL CHECK(decision IN ('accepted','rejected')),
+    peak_watts REAL NOT NULL,
+    peak_at TEXT NOT NULL DEFAULT '',
+    total_energy_wh REAL NOT NULL,
+    result_json TEXT NOT NULL,
+    reasons_json TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_power_evaluations_plan ON power_evaluations(plan_id,id);
+CREATE INDEX IF NOT EXISTS idx_power_evaluations_budget ON power_evaluations(budget_id,id);
 '''
 
 PERMISSIONS = [
